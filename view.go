@@ -24,9 +24,6 @@ func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading..."
 	}
-	if m.width < minWidth || m.height < minHeight {
-		return errorStyle.Render(fmt.Sprintf("terminal too small (%dx%d) — minimum %dx%d", m.width, m.height, minWidth, minHeight))
-	}
 
 	if m.showOllamaGen {
 		return m.renderDialogPage(m.renderOllamaGenModal())
@@ -948,7 +945,7 @@ func (m Model) renderHelpModal() string {
 		keyStyle.Render("y / enter") + " " + actionStyle.Render("confirm destructive actions"),
 		keyStyle.Render("n / esc") + " " + actionStyle.Render("cancel destructive actions"),
 		keyStyle.Render("ctrl+l") + " " + actionStyle.Render("clear query editor"),
-		keyStyle.Render("ctrl+g") + " " + actionStyle.Render("AI generate query (ollama)"),
+		keyStyle.Render("ctrl+g") + " " + actionStyle.Render(ollamaHelpLabel()),
 		keyStyle.Render("ctrl+t") + " " + actionStyle.Render("templates picker"),
 		keyStyle.Render("ctrl+e") + " " + actionStyle.Render("examples picker"),
 		keyStyle.Render("ctrl+o") + " " + actionStyle.Render("query history picker"),
@@ -960,7 +957,7 @@ func (m Model) renderHelpModal() string {
 		keyStyle.Render("home / end") + " " + actionStyle.Render("jump Query Reference"),
 		keyStyle.Render("tab") + " " + actionStyle.Render("accept completion"),
 		keyStyle.Render("f / x / y") + " " + actionStyle.Render("templates / examples / history from Query"),
-		keyStyle.Render("g / u / s") + " " + actionStyle.Render("ai generate / saved / save from Query"),
+		keyStyle.Render("g / u / s") + " " + actionStyle.Render(queryShortcutHelpLabel()),
 		keyStyle.Render("←/→") + " " + actionStyle.Render("page result columns"),
 		keyStyle.Render("c / C") + " " + actionStyle.Render("copy direct / copy as (Browse/Results/Query)"),
 		keyStyle.Render("v") + " " + actionStyle.Render("inspect selected schema/result row"),
@@ -971,6 +968,20 @@ func (m Model) renderHelpModal() string {
 	}
 
 	return dialogStyle.Width(min(64, m.width-6)).Render(strings.Join(lines, "\n"))
+}
+
+func ollamaHelpLabel() string {
+	if isDemoMode() {
+		return "AI generate query (disabled in public demo)"
+	}
+	return "AI generate query (ollama)"
+}
+
+func queryShortcutHelpLabel() string {
+	if isDemoMode() {
+		return "ai generate disabled / saved / save from Query"
+	}
+	return "ai generate / saved / save from Query"
 }
 
 func dbIcon(dbType string) string {

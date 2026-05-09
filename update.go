@@ -3793,6 +3793,10 @@ var _ = textinput.New
 
 // openOllamaGen opens the ollama NLP query modal.
 func (m Model) openOllamaGen() (tea.Model, tea.Cmd) {
+	if isDemoMode() {
+		m.setStatus("AI query generation is disabled in the public demo. Run bobdb locally with Ollama to use ctrl+g.")
+		return m, nil
+	}
 	m.showOllamaGen = true
 	m.ollamaResult = ""
 	m.ollamaErr = ""
