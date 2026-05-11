@@ -139,6 +139,30 @@ func TestMongoCompleteFindOneProjectionPickerAtSingleArgEnd(t *testing.T) {
 	}
 }
 
+func TestMongoCompleteFindProjectionIgnoresParenInsideStringLiteral(t *testing.T) {
+	req := Request{
+		Query:  `db.users.find({"status":"active ) value"})`,
+		Cursor: len(`db.users.find({"status":"active ) value"})`),
+		DBType: "mongo",
+		Tables: []string{"users"},
+		Schema: &SchemaInfo{Name: "users", Columns: []ColumnInfo{
+			{Name: "status", Type: "string"},
+			{Name: "email", Type: "string"},
+		}},
+		InferredTable: "users",
+	}
+	result := Complete(req)
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if result.Title != "Project Fields" {
+		t.Fatalf("Title = %q, want Project Fields", result.Title)
+	}
+	if !result.Multi || result.MultiPrefix != ", {" || result.MultiSuffix != "}" {
+		t.Fatalf("unexpected projection multi config: %+v", result)
+	}
+}
+
 func TestSQLCompleteRejectsWrongSchema(t *testing.T) {
 	req := Request{
 		Query:         `SELECT * FROM orders WHERE `,

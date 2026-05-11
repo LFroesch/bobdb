@@ -65,7 +65,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.browseData = nil
 		m.browseDataTableName = ""
 		m.browseDataTable.SetRows(nil)
-		m.browseFocusColumn = 0
 		m.browseColOffset = 0
 		m.browseVisibleColumn = 0
 		m.querySourceTable = ""
@@ -75,7 +74,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.queryResult = nil
 		m.queryErr = ""
 		m.resultTable.SetRows(nil)
-		m.resultFocusColumn = 0
 		m.resultColOffset = 0
 		m.resultVisibleColumn = 0
 		m.loading = true
@@ -163,7 +161,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.browseData = msg.result
 		m.browseDataTableName = msg.table
-		m.browseFocusColumn = 0
 		m.browseColOffset = 0
 		m.browseDataTable.SetCursor(0)
 		m.syncBrowseDataTable()
@@ -182,7 +179,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case columnValuesMsg:
 		key := columnValueKey(msg.connIdx, msg.table, msg.column)
 		delete(m.columnValuePending, key)
-		if msg.err != nil || msg.connIdx != m.activeConnIdx {
+		if msg.connIdx != m.activeConnIdx {
+			return m, nil
+		}
+		if msg.err != nil {
+			// Cache an empty result on failure so the picker does not sit in a
+			// perpetual "fetching samples" loop for the same broken request.
+			m.columnValueCache[key] = []string{}
+			m.setStatus("sample values unavailable: " + msg.err.Error())
+			if m.showColumnPicker && m.activeTab == tabQuery && m.queryFocus {
+				_, cmd := m.refreshCompletionPicker(false)
+				return m, cmd
+			}
 			return m, nil
 		}
 		m.columnValueCache[key] = msg.values
@@ -294,8 +302,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.navigateBack()
 		case "?":
-			m.showHelp = true
-			return m, nil
+			if !m.textInputCapturesKeypress() {
+				m.showHelp = true
+				return m, nil
+			}
 		case "/":
 			if m.activeDB != nil {
 				m.openQueryTab()
@@ -415,6 +425,16 @@ func (m Model) updateConnections(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // --- Browse tab ---
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.browseView == browseViewData && browseGridArrowKey(msg) {
+		m.focus = panelRight
+		m.syncTableFocus()
+		return m.updateBrowseData(msg)
+	}
+	if m.browseView == browseViewSchema && browseSchemaArrowKey(msg) {
+		m.focus = panelRight
+		m.syncTableFocus()
+		return m.updateBrowseSchema(msg)
+	}
 	if m.focus == panelRight && m.browseView == browseViewData {
 		return m.updateBrowseData(msg)
 	}
@@ -428,6 +448,8 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.moveTableCursor(1)
 	case "k", "up":
 		return m.moveTableCursor(-1)
+	case "l", "right":
+		return m.switchBrowseToData()
 	case "r":
 		m.browseData = nil
 		m.browseDataTableName = ""
@@ -452,6 +474,10 @@ func (m Model) updateBrowseSchema(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.schemaTable, cmd = m.schemaTable.Update(msg)
 		return m, cmd
+	case "h", "left":
+		m.focus = panelLeft
+		m.syncTableFocus()
+		return m, nil
 	case "v":
 		m.openSchemaInspect()
 		return m, nil
@@ -470,12 +496,13 @@ func (m Model) updateBrowseData(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "j", "down", "k", "up":
 		var cmd tea.Cmd
 		m.browseDataTable, cmd = m.browseDataTable.Update(msg)
+		m.syncBrowseDataTable()
 		return m, cmd
 	case "h", "left":
-		m.moveBrowseFocusColumn(-1)
+		m.shiftBrowseColumns(-1)
 		return m, nil
 	case "l", "right":
-		m.moveBrowseFocusColumn(1)
+		m.shiftBrowseColumns(1)
 		return m, nil
 	case "enter":
 		m.browseView = browseViewSchema
@@ -494,6 +521,24 @@ func (m Model) updateBrowseData(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openQueryPicker("Copy Browse Row As", m.browseCopyPickerItems())
 	}
 	return m, nil
+}
+
+func browseGridArrowKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "up", "down", "left", "right":
+		return true
+	default:
+		return false
+	}
+}
+
+func browseSchemaArrowKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "up", "down":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m Model) switchBrowseToData() (tea.Model, tea.Cmd) {
@@ -710,11 +755,21 @@ func (m Model) updateQueryPageScroll(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if resultGridArrowKey(msg) && m.queryResult != nil {
+		m.focus = panelRight
+		m.syncTableFocus()
+		return m.updateResultsGrid(msg)
+	}
+	return m.updateResultsGrid(msg)
+}
+
+func (m Model) updateResultsGrid(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
 		if m.focus == panelRight {
 			var cmd tea.Cmd
 			m.resultTable, cmd = m.resultTable.Update(msg)
+			m.syncResultTable()
 			return m, cmd
 		}
 		return m.moveTableCursor(1)
@@ -722,9 +777,23 @@ func (m Model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == panelRight {
 			var cmd tea.Cmd
 			m.resultTable, cmd = m.resultTable.Update(msg)
+			m.syncResultTable()
 			return m, cmd
 		}
 		return m.moveTableCursor(-1)
+	case "l", "right":
+		if m.focus == panelLeft {
+			m.focus = panelRight
+			m.syncTableFocus()
+			return m, nil
+		}
+		m.shiftResultColumns(1)
+		return m, nil
+	case "h", "left":
+		if m.focus == panelRight {
+			m.shiftResultColumns(-1)
+		}
+		return m, nil
 	case "e":
 		return m.openContextualEdit()
 	case "E":
@@ -733,14 +802,14 @@ func (m Model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == panelLeft && len(m.tables) > 0 {
 			return m.runDefaultBrowseQuery()
 		}
-	case "h", "shift+left", "left":
+	case "shift+left":
 		if m.focus == panelRight {
-			m.moveResultFocusColumn(-1)
+			m.shiftResultColumns(-1)
 			return m, nil
 		}
-	case "l", "shift+right", "right":
+	case "shift+right":
 		if m.focus == panelRight {
-			m.moveResultFocusColumn(1)
+			m.shiftResultColumns(1)
 			return m, nil
 		}
 	case "v":
@@ -758,6 +827,15 @@ func (m Model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func resultGridArrowKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "up", "down", "left", "right", "shift+left", "shift+right":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m Model) updateHistory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1152,7 +1230,6 @@ func (m *Model) togglePanel() {
 func (m *Model) resetResultViewport() {
 	m.resultColOffset = 0
 	m.resultVisibleColumn = 0
-	m.resultFocusColumn = 0
 	m.resultTable.SetCursor(0)
 }
 
@@ -1188,7 +1265,6 @@ func (m Model) moveTableCursor(delta int) (tea.Model, tea.Cmd) {
 	m.syncHelperCursor()
 	m.browseData = nil
 	m.browseDataTableName = ""
-	m.browseFocusColumn = 0
 	m.browseColOffset = 0
 	m.browseVisibleColumn = 0
 	m.browseDataTable.SetRows(nil)
@@ -1378,10 +1454,10 @@ func schemaCacheKey(connIdx int, table string) string {
 func columnValuesQuery(dbType, table, column string) string {
 	switch dbType {
 	case "sqlite", "postgres":
-		return fmt.Sprintf(`SELECT DISTINCT %q FROM %q WHERE %q IS NOT NULL ORDER BY %q LIMIT 20`, column, table, column, column)
+		return fmt.Sprintf(`SELECT DISTINCT %q FROM (SELECT %q FROM %q WHERE %q IS NOT NULL LIMIT 200) AS bobdb_samples ORDER BY %q LIMIT 20`, column, column, table, column, column)
 	case "mongo":
 		field := strings.ReplaceAll(column, `"`, `\"`)
-		return fmt.Sprintf(`db.%s.aggregate([{"$match":{"%s":{"$exists":true}}},{"$group":{"_id":"$%s"}},{"$limit":20}])`, table, field, field)
+		return fmt.Sprintf(`db.%s.aggregate([{"$match":{"%s":{"$exists":true}}},{"$sample":{"size":200}},{"$group":{"_id":"$%s"}},{"$limit":20}])`, table, field, field)
 	default:
 		return ""
 	}
@@ -1504,14 +1580,16 @@ func (m Model) focusedBrowseColumn() string {
 	if m.browseData == nil || len(m.browseData.Columns) == 0 {
 		return ""
 	}
-	return m.browseData.Columns[clampInt(m.browseFocusColumn, 0, len(m.browseData.Columns)-1)]
+	colIdx := clampInt(m.browseColOffset, 0, len(m.browseData.Columns)-1)
+	return m.browseData.Columns[colIdx]
 }
 
 func (m Model) focusedResultColumn() string {
 	if m.queryResult == nil || len(m.queryResult.Columns) == 0 {
 		return ""
 	}
-	return m.queryResult.Columns[clampInt(m.resultFocusColumn, 0, len(m.queryResult.Columns)-1)]
+	colIdx := clampInt(m.resultColOffset, 0, len(m.queryResult.Columns)-1)
+	return m.queryResult.Columns[colIdx]
 }
 
 func (m Model) buildContextualUpdate(tableName, focusedCol string, rowCols, rowValues []string, prefill bool) string {
@@ -1980,15 +2058,20 @@ func (m *Model) syncResultTable() {
 	if m.queryResult == nil || len(m.queryResult.Columns) == 0 {
 		m.resultTable.SetRows(nil)
 		m.resultTable.SetColumns(nil)
-		m.resultFocusColumn = 0
 		m.resultVisibleColumn = 0
 		return
 	}
 
-	m.resultFocusColumn = clampInt(m.resultFocusColumn, 0, len(m.queryResult.Columns)-1)
-	start, cols := visibleColumnsAroundFocus(m.queryResult, w, m.resultColOffset, m.resultFocusColumn)
+	start, cols := visibleResultColumns(m.queryResult, w, m.resultColOffset)
 	m.resultColOffset = start
 	m.resultVisibleColumn = len(cols)
+	cursor := m.resultTable.Cursor()
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(m.queryResult.Rows) {
+		cursor = len(m.queryResult.Rows) - 1
+	}
 
 	rows := make([]table.Row, 0, len(m.queryResult.Rows))
 	for _, row := range m.queryResult.Rows {
@@ -2010,10 +2093,6 @@ func (m *Model) syncResultTable() {
 	if len(rows) == 0 {
 		m.resultTable.SetCursor(0)
 		return
-	}
-	cursor := m.resultTable.Cursor()
-	if cursor < 0 {
-		cursor = 0
 	}
 	if cursor >= len(rows) {
 		cursor = len(rows) - 1
@@ -2039,32 +2118,25 @@ func (m *Model) shiftResultColumns(delta int) {
 	m.syncResultTable()
 }
 
-func (m *Model) moveResultFocusColumn(delta int) {
-	if m.queryResult == nil || len(m.queryResult.Columns) == 0 {
-		return
-	}
-	next := clampInt(m.resultFocusColumn+delta, 0, len(m.queryResult.Columns)-1)
-	if next == m.resultFocusColumn {
-		return
-	}
-	m.resultFocusColumn = next
-	m.syncResultTable()
-}
-
 func (m *Model) syncBrowseDataTable() {
 	w := max(12, m.tableViewportWidth())
 	if m.browseData == nil || len(m.browseData.Columns) == 0 {
 		m.browseDataTable.SetRows(nil)
 		m.browseDataTable.SetColumns(nil)
-		m.browseFocusColumn = 0
 		m.browseVisibleColumn = 0
 		return
 	}
 
-	m.browseFocusColumn = clampInt(m.browseFocusColumn, 0, len(m.browseData.Columns)-1)
-	start, cols := visibleColumnsAroundFocus(m.browseData, w, m.browseColOffset, m.browseFocusColumn)
+	start, cols := visibleResultColumns(m.browseData, w, m.browseColOffset)
 	m.browseColOffset = start
 	m.browseVisibleColumn = len(cols)
+	cursor := m.browseDataTable.Cursor()
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(m.browseData.Rows) {
+		cursor = len(m.browseData.Rows) - 1
+	}
 
 	rows := make([]table.Row, 0, len(m.browseData.Rows))
 	for _, row := range m.browseData.Rows {
@@ -2087,10 +2159,6 @@ func (m *Model) syncBrowseDataTable() {
 		m.browseDataTable.SetCursor(0)
 		return
 	}
-	cursor := m.browseDataTable.Cursor()
-	if cursor < 0 {
-		cursor = 0
-	}
 	if cursor >= len(rows) {
 		cursor = len(rows) - 1
 	}
@@ -2112,18 +2180,6 @@ func (m *Model) shiftBrowseColumns(delta int) {
 		return
 	}
 	m.browseColOffset = next
-	m.syncBrowseDataTable()
-}
-
-func (m *Model) moveBrowseFocusColumn(delta int) {
-	if m.browseData == nil || len(m.browseData.Columns) == 0 {
-		return
-	}
-	next := clampInt(m.browseFocusColumn+delta, 0, len(m.browseData.Columns)-1)
-	if next == m.browseFocusColumn {
-		return
-	}
-	m.browseFocusColumn = next
 	m.syncBrowseDataTable()
 }
 
@@ -2195,6 +2251,36 @@ func (m *Model) openResultInspect() {
 	m.inspectLines, m.inspectCopy = m.renderResultRowInspect(cursor)
 	m.inspectScroll = 0
 	m.showInspect = true
+}
+
+func (m *Model) openInspectText(title, value string) {
+	lines := wrapTextPreservingRuns(strings.TrimSpace(value), max(20, min(96, m.width-14)))
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	rendered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		rendered = append(rendered, textStyle.Render(line))
+	}
+	m.inspectTitle = title
+	m.inspectLines = rendered
+	m.inspectCopy = value
+	m.inspectScroll = 0
+	m.showInspect = true
+}
+
+func queryPickerInspectTitle(title string, item queryPickerItem) string {
+	label := strings.TrimSpace(item.label)
+	switch {
+	case label != "" && title != "":
+		return title + ": " + label
+	case label != "":
+		return label
+	case title != "":
+		return title
+	default:
+		return "Detail"
+	}
 }
 
 func (m Model) tableViewportWidth() int {
@@ -2294,6 +2380,10 @@ func (m *Model) openDeleteConnectionConfirm(idx int) {
 }
 
 func (m *Model) openRunQueryConfirm(query string) {
+	m.showColumnPicker = false
+	m.columnPickerValueMode = false
+	m.columnPickerValuePrefix = ""
+	m.columnPickerValueCursor = 0
 	label := "Confirm Query"
 	body := []string{"Run this write query?"}
 	switch m.activeDB.Type() {
@@ -2854,6 +2944,12 @@ func (m Model) updateQueryPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		if item := m.currentQueryPickerItem(); item.value != "" {
 			return m.copyNamedText("query", item.value)
+		}
+	case "v":
+		if item := m.currentQueryPickerItem(); item.value != "" && !item.sectionRow {
+			m.showQueryPicker = false
+			m.openInspectText(queryPickerInspectTitle(m.queryPickerTitle, item), item.value)
+			return m, nil
 		}
 	case "enter":
 		item := m.currentQueryPickerItem()
@@ -3851,6 +3947,13 @@ func (m Model) updateOllamaGen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.ollamaInput.Focus()
 		}
 		return m, nil
+	case "v":
+		if m.ollamaResult != "" {
+			m.showOllamaGen = false
+			m.ollamaInput.Blur()
+			m.openInspectText("Generated query", m.ollamaResult)
+			return m, nil
+		}
 	}
 
 	// In result/error phase, don't forward to textinput

@@ -76,6 +76,10 @@ var (
 				Background(colorSurface).
 				Bold(true)
 
+	inactiveSelectedItemStyle = lipgloss.NewStyle().
+				Foreground(colorAccent).
+				Bold(true)
+
 	tableHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorAccent)

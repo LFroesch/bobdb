@@ -158,7 +158,6 @@ type Model struct {
 	browseDataTable     table.Model
 	browseDataTableName string
 	browseDataReqID     int
-	browseFocusColumn   int
 	browseColOffset     int
 	browseVisibleColumn int
 
@@ -169,7 +168,6 @@ type Model struct {
 	queryFocus          bool // true = textarea focused
 	queryRefScroll      int
 	resultTable         table.Model
-	resultFocusColumn   int
 	resultColOffset     int
 	resultVisibleColumn int
 	queryHistory        []string

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -14,7 +15,9 @@ import (
 )
 
 type fakeDB struct {
-	dbType string
+	dbType      string
+	runQueryErr error
+	runQueryRes *db.QueryResult
 }
 
 func (f *fakeDB) Connect() error                                 { return nil }
@@ -22,7 +25,15 @@ func (f *fakeDB) Close()                                         {}
 func (f *fakeDB) Ping() error                                    { return nil }
 func (f *fakeDB) GetTables() ([]string, error)                   { return []string{"users", "orders"}, nil }
 func (f *fakeDB) GetTableSchema(string) (*db.TableSchema, error) { return &db.TableSchema{}, nil }
-func (f *fakeDB) RunQuery(string) (*db.QueryResult, error)       { return &db.QueryResult{}, nil }
+func (f *fakeDB) RunQuery(string) (*db.QueryResult, error) {
+	if f.runQueryErr != nil {
+		return nil, f.runQueryErr
+	}
+	if f.runQueryRes != nil {
+		return f.runQueryRes, nil
+	}
+	return &db.QueryResult{}, nil
+}
 func (f *fakeDB) Type() string                                   { return f.dbType }
 func (f *fakeDB) DSN() string                                    { return "" }
 
@@ -68,6 +79,24 @@ func TestEditorEscReturnsFocusToResultsPane(t *testing.T) {
 	}
 	if got.focus != panelRight {
 		t.Fatalf("expected focus to stay on right pane, got %v", got.focus)
+	}
+}
+
+func TestQueryEditorQuestionMarkStaysInEditor(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabQuery
+	m.queryFocus = true
+	m.queryInput.Focus()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	got := next.(Model)
+
+	if got.showHelp {
+		t.Fatalf("expected help to stay closed while typing in query editor")
+	}
+	if got.queryInput.Value() != "?" {
+		t.Fatalf("query editor value = %q, want ?", got.queryInput.Value())
 	}
 }
 
@@ -335,6 +364,75 @@ func TestFormatDisplayValueTrimsTimestampFractionZeros(t *testing.T) {
 	}
 }
 
+func TestTruncateDisplayMiddleTruncatesLongIdentifiers(t *testing.T) {
+	got := truncateDisplay("507f1f77bcf86cd799439011", 14)
+	want := "507f1...439011"
+	if got != want {
+		t.Fatalf("truncateDisplay long id = %q, want %q", got, want)
+	}
+
+	got = truncateDisplay("alice@example.com", 10)
+	if got != "alice@e..." {
+		t.Fatalf("truncateDisplay email = %q, want alice@e...", got)
+	}
+
+	got = truncateDisplay("status = published posts ordered by created_at", 14)
+	if got != "status = pu..." {
+		t.Fatalf("truncateDisplay sentence = %q, want end truncation", got)
+	}
+}
+
+func TestQueryPickerVOpensInspectForFullValue(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.width = 120
+	m.height = 40
+	m.showQueryPicker = true
+	m.queryPickerTitle = "Recent Queries"
+	m.queryPickerItems = []queryPickerItem{
+		{label: "find post", value: `db.posts.find({"_id":"507f1f77bcf86cd799439011"})`, kind: "history"},
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	got := next.(Model)
+
+	if got.showQueryPicker {
+		t.Fatalf("expected picker to close when opening inspect")
+	}
+	if !got.showInspect {
+		t.Fatalf("expected inspect modal to open")
+	}
+	if got.inspectTitle != "Recent Queries: find post" {
+		t.Fatalf("inspect title = %q", got.inspectTitle)
+	}
+	if !strings.Contains(stripANSIForTest(strings.Join(got.inspectLines, "\n")), "507f1f77bcf86cd799439011") {
+		t.Fatalf("inspect view should contain full identifier")
+	}
+}
+
+func TestOllamaResultVOpensInspectForFullQuery(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.width = 120
+	m.height = 40
+	m.showOllamaGen = true
+	m.ollamaResult = `db.posts.find({"_id":"507f1f77bcf86cd799439011"})`
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	got := next.(Model)
+
+	if got.showOllamaGen {
+		t.Fatalf("expected ollama modal to close when opening inspect")
+	}
+	if !got.showInspect {
+		t.Fatalf("expected inspect modal to open")
+	}
+	if got.inspectTitle != "Generated query" {
+		t.Fatalf("inspect title = %q, want Generated query", got.inspectTitle)
+	}
+	if !strings.Contains(stripANSIForTest(strings.Join(got.inspectLines, "\n")), "507f1f77bcf86cd799439011") {
+		t.Fatalf("inspect view should preserve full generated query")
+	}
+}
+
 func TestSyncResultTableHandlesColumnCountChanges(t *testing.T) {
 	m := newModel(&config.Config{})
 	m.width = 120
@@ -352,6 +450,28 @@ func TestSyncResultTableHandlesColumnCountChanges(t *testing.T) {
 
 	if got := len(m.resultTable.Columns()); got != 2 {
 		t.Fatalf("result table columns = %d, want 2", got)
+	}
+}
+
+func TestSyncResultTableUsesVisibleColumnOffset(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.width = 120
+	m.queryResult = &db.QueryResult{
+		Columns: []string{"id", "email", "role"},
+		Rows:    [][]string{{"1", "alice@example.com", "admin"}},
+	}
+	m.resultColOffset = 1
+	m.syncResultTable()
+
+	cols := m.resultTable.Columns()
+	if len(cols) < 2 {
+		t.Fatalf("result table columns = %d, want at least 2", len(cols))
+	}
+	if cols[0].Title != "email" {
+		t.Fatalf("first visible result column = %q, want email", cols[0].Title)
+	}
+	if cell := m.resultTable.Rows()[0][0]; cell != "alice@example.com" {
+		t.Fatalf("first visible result cell = %q, want alice@example.com", cell)
 	}
 }
 
@@ -858,6 +978,179 @@ func TestWriteQueryRunsAfterConfirmation(t *testing.T) {
 	}
 }
 
+func TestWriteQueryConfirmClosesCompletionPicker(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabQuery
+	m.focus = panelRight
+	m.queryFocus = true
+	m.queryInput.Focus()
+	m.queryInput.SetValue(`DELETE FROM "users";`)
+	m.showColumnPicker = true
+	m.columnPickerValueMode = true
+	m.columnPickerValuePrefix = "ali"
+	m.columnPickerItems = []completion.Item{{Label: "alice"}}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	got := next.(Model)
+
+	if !got.showConfirm {
+		t.Fatalf("expected write query confirmation modal")
+	}
+	if got.showColumnPicker {
+		t.Fatalf("expected completion picker to close before confirmation")
+	}
+	if got.columnPickerValueMode {
+		t.Fatalf("expected value-mode picker state to reset")
+	}
+}
+
+func TestColumnValueErrorStopsFetchingLoop(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeConnIdx = 2
+	m.activeTab = tabQuery
+	m.focus = panelRight
+	m.queryFocus = true
+	m.queryInput.Focus()
+	m.showColumnPicker = true
+	m.columnPickerValueCol = "status"
+	m.columnPickerValueTable = "users"
+
+	next, _ := m.Update(columnValuesMsg{
+		connIdx: 2,
+		table:   "users",
+		column:  "status",
+		err:     fmt.Errorf("timeout"),
+	})
+	got := next.(Model)
+
+	key := columnValueKey(2, "users", "status")
+	values, ok := got.columnValueCache[key]
+	if !ok {
+		t.Fatalf("expected error result to populate cache")
+	}
+	if values == nil {
+		t.Fatalf("expected cached empty slice, got nil")
+	}
+	if !strings.Contains(got.statusMsg, "sample values unavailable") {
+		t.Fatalf("status = %q, want sample-values error", got.statusMsg)
+	}
+}
+
+func TestBrowseRightArrowOpensDataPane(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabBrowse
+	m.focus = panelLeft
+	m.tables = []string{"users"}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := next.(Model)
+
+	if got.browseView != browseViewData {
+		t.Fatalf("browseView = %v, want data", got.browseView)
+	}
+	if got.focus != panelRight {
+		t.Fatalf("focus = %v, want right", got.focus)
+	}
+	if cmd == nil {
+		t.Fatalf("expected browse data load command")
+	}
+}
+
+func TestBrowseArrowKeysDriveDataGridEvenFromLeftPane(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabBrowse
+	m.focus = panelLeft
+	m.width = 120
+	m.browseView = browseViewData
+	m.browseData = &db.QueryResult{
+		Columns: []string{"id", "email", "role"},
+		Rows: [][]string{
+			{"1", "a@example.com", "admin"},
+			{"2", "b@example.com", "member"},
+		},
+	}
+	m.syncBrowseDataTable()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := next.(Model)
+	if got.focus != panelRight {
+		t.Fatalf("focus = %v, want right", got.focus)
+	}
+	if got.browseColOffset != 1 {
+		t.Fatalf("browseColOffset = %d, want 1", got.browseColOffset)
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got = next.(Model)
+	if got.browseDataTable.Cursor() != 1 {
+		t.Fatalf("browse cursor = %d, want 1", got.browseDataTable.Cursor())
+	}
+	if cell := got.browseDataTable.Rows()[1][0]; cell != "b@example.com" {
+		t.Fatalf("browse visible cell after down = %q, want b@example.com", cell)
+	}
+}
+
+func TestResultsRightArrowFocusesResultPane(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabResults
+	m.focus = panelLeft
+	m.width = 120
+	m.queryResult = &db.QueryResult{
+		Columns: []string{"id", "email", "status"},
+		Rows:    [][]string{{"1", "a@example.com", "active"}},
+	}
+	m.syncResultTable()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := next.(Model)
+
+	if got.focus != panelRight {
+		t.Fatalf("focus = %v, want right", got.focus)
+	}
+	if got.resultColOffset != 1 {
+		t.Fatalf("resultColOffset = %d, want 1", got.resultColOffset)
+	}
+}
+
+func TestResultsArrowKeysDriveGridEvenFromLeftPane(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabResults
+	m.focus = panelLeft
+	m.width = 120
+	m.queryResult = &db.QueryResult{
+		Columns: []string{"id", "email", "status"},
+		Rows: [][]string{
+			{"1", "a@example.com", "active"},
+			{"2", "b@example.com", "paused"},
+		},
+	}
+	m.syncResultTable()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := next.(Model)
+	if got.focus != panelRight {
+		t.Fatalf("focus = %v, want right", got.focus)
+	}
+	if got.resultColOffset != 1 {
+		t.Fatalf("resultColOffset = %d, want 1", got.resultColOffset)
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got = next.(Model)
+	if got.resultTable.Cursor() != 1 {
+		t.Fatalf("result cursor = %d, want 1", got.resultTable.Cursor())
+	}
+	if cell := got.resultTable.Rows()[1][0]; cell != "b@example.com" {
+		t.Fatalf("result visible cell after down = %q, want b@example.com", cell)
+	}
+}
+
 func TestPushQueryHistoryMovesDuplicateToFront(t *testing.T) {
 	m := newModel(&config.Config{})
 	m.pushQueryHistory("select 1;")
@@ -1253,7 +1546,6 @@ func TestResultsTabResetsToFirstRowAndColumn(t *testing.T) {
 		},
 	}
 	m.resultColOffset = 2
-	m.resultFocusColumn = 2
 	m.resultVisibleColumn = 1
 	m.resultTable.SetCursor(1)
 
@@ -1268,9 +1560,6 @@ func TestResultsTabResetsToFirstRowAndColumn(t *testing.T) {
 	}
 	if got.resultColOffset != 0 {
 		t.Fatalf("resultColOffset = %d, want 0", got.resultColOffset)
-	}
-	if got.resultFocusColumn != 0 {
-		t.Fatalf("resultFocusColumn = %d, want 0", got.resultFocusColumn)
 	}
 	if got.resultTable.Cursor() != 0 {
 		t.Fatalf("result row cursor = %d, want 0", got.resultTable.Cursor())
@@ -1293,7 +1582,7 @@ func TestContextualEditUsesFocusedBrowseColumn(t *testing.T) {
 	}
 	m.width = 60
 	m.syncBrowseDataTable()
-	m.moveBrowseFocusColumn(1)
+	m.shiftBrowseColumns(1)
 
 	next, _ := m.openContextualEdit()
 	got := next.(Model)
@@ -1303,6 +1592,28 @@ func TestContextualEditUsesFocusedBrowseColumn(t *testing.T) {
 	}
 	if strings.Contains(got.queryInput.Value(), `SET "id" = '1'`) {
 		t.Fatalf("query = %q, should not target leftmost visible column for SET", got.queryInput.Value())
+	}
+}
+
+func TestSyncBrowseDataTableUsesVisibleColumnOffset(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.width = 120
+	m.browseData = &db.QueryResult{
+		Columns: []string{"id", "email", "role"},
+		Rows:    [][]string{{"1", "alice@example.com", "admin"}},
+	}
+	m.browseColOffset = 2
+	m.syncBrowseDataTable()
+
+	cols := m.browseDataTable.Columns()
+	if len(cols) < 1 {
+		t.Fatalf("browse table columns = %d, want at least 1", len(cols))
+	}
+	if cols[0].Title != "role" {
+		t.Fatalf("first visible browse header = %q, want role", cols[0].Title)
+	}
+	if cell := m.browseDataTable.Rows()[0][0]; cell != "admin" {
+		t.Fatalf("first visible browse cell = %q, want admin", cell)
 	}
 }
 
@@ -1320,7 +1631,7 @@ func TestContextualEditUsesFocusedResultColumn(t *testing.T) {
 	}
 	m.width = 60
 	m.syncResultTable()
-	m.moveResultFocusColumn(2)
+	m.shiftResultColumns(2)
 
 	next, _ := m.openContextualEdit()
 	got := next.(Model)

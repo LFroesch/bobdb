@@ -318,6 +318,7 @@ func (m Model) renderConnectionList(w, h int) string {
 		return padLines(lines, h)
 	}
 
+	leftFocused := m.focus == panelLeft && m.activeTab == tabConnections
 	visibleH := max(1, h-2)
 	start := listStartForCursor(len(m.cfg.Connections), visibleH, m.connCursor)
 	end := min(len(m.cfg.Connections), start+visibleH)
@@ -326,7 +327,12 @@ func (m Model) renderConnectionList(w, h int) string {
 		label := fmt.Sprintf("%s %s", dbIcon(conn.Type), truncate(conn.Name, w-4))
 		switch {
 		case i == m.connCursor:
-			lines = append(lines, selectedItemStyle.Render(" "+padRight(label, w-2)+" "))
+			row := " " + padRight(label, w-2) + " "
+			if leftFocused {
+				lines = append(lines, selectedItemStyle.Render(row))
+			} else {
+				lines = append(lines, inactiveSelectedItemStyle.Render(row))
+			}
 		case i == m.activeConnIdx:
 			lines = append(lines, connectedStyle.Render(" "+label))
 		default:
@@ -347,6 +353,7 @@ func (m Model) renderTableList(w, h int) string {
 		return padLines(append(lines, dimStyle.Render("no "+m.dataSourceLabelPlural())), h)
 	}
 
+	leftFocused := m.focus == panelLeft && m.activeTab == tabBrowse
 	visibleH := max(1, h-2)
 	start := listStartForCursor(len(m.tables), visibleH, m.tableCursor)
 	end := min(len(m.tables), start+visibleH)
@@ -354,7 +361,12 @@ func (m Model) renderTableList(w, h int) string {
 		table := m.tables[i]
 		name := truncate(table, w-3)
 		if i == m.tableCursor {
-			lines = append(lines, selectedItemStyle.Render(" "+padRight(name, w-2)+" "))
+			row := " " + padRight(name, w-2) + " "
+			if leftFocused {
+				lines = append(lines, selectedItemStyle.Render(row))
+			} else {
+				lines = append(lines, inactiveSelectedItemStyle.Render(row))
+			}
 		} else {
 			lines = append(lines, " "+name)
 		}
@@ -570,6 +582,7 @@ func (m Model) renderHelperList(w, h int) string {
 		return padLines(lines, h)
 	}
 
+	leftFocused := m.focus == panelLeft && m.activeTab == tabHelpers
 	visibleH := max(1, h-2)
 	start := listStartForCursor(len(helpers), visibleH, m.helperCursor)
 	end := min(len(helpers), start+visibleH)
@@ -577,7 +590,12 @@ func (m Model) renderHelperList(w, h int) string {
 		helper := helpers[i]
 		name := truncate(helper.label, w-3)
 		if i == m.helperCursor {
-			lines = append(lines, selectedItemStyle.Render(" "+padRight(name, w-2)+" "))
+			row := " " + padRight(name, w-2) + " "
+			if leftFocused {
+				lines = append(lines, selectedItemStyle.Render(row))
+			} else {
+				lines = append(lines, inactiveSelectedItemStyle.Render(row))
+			}
 		} else {
 			lines = append(lines, " "+name)
 		}
@@ -592,13 +610,19 @@ func (m Model) renderHistoryList(w, h int) string {
 		lines = append(lines, dimStyle.Render("no queries yet"), dimStyle.Render("run a query to save it here"))
 		return padLines(lines, h)
 	}
+	leftFocused := m.focus == panelLeft && m.activeTab == tabHistory
 	visibleH := max(1, h-2)
 	start := listStartForCursor(len(m.queryHistory), visibleH, m.historyCursor)
 	end := min(len(m.queryHistory), start+visibleH)
 	for i := start; i < end; i++ {
 		name := truncate(compactInline(m.queryHistory[i]), w-3)
 		if i == m.historyCursor {
-			lines = append(lines, selectedItemStyle.Render(" "+padRight(name, w-2)+" "))
+			row := " " + padRight(name, w-2) + " "
+			if leftFocused {
+				lines = append(lines, selectedItemStyle.Render(row))
+			} else {
+				lines = append(lines, inactiveSelectedItemStyle.Render(row))
+			}
 		} else {
 			lines = append(lines, " "+name)
 		}
@@ -1179,10 +1203,10 @@ func (m Model) renderQueryPickerModal() string {
 				lines = append(lines, dimStyle.Render("  …"))
 				break
 			}
-			lines = append(lines, dimStyle.Render("  "+truncate(pl, max(20, rowW-2))))
+			lines = append(lines, dimStyle.Render("  "+truncate(abbreviateLongTokens(pl, 18), max(20, rowW-2))))
 		}
 	}
-	lines = append(lines, "", dimStyle.Render("enter loads · c copies · esc closes"))
+	lines = append(lines, "", dimStyle.Render("enter loads · c copies · v full view · esc closes"))
 	return dialogStyle.Width(min(92, m.width-6)).Render(strings.Join(lines, "\n"))
 }
 
@@ -1326,7 +1350,93 @@ func compactInline(s string) string {
 }
 
 func fitTableCell(s string, width int) string {
-	return truncate(compactInline(formatDisplayValue(s)), max(1, width-1))
+	return truncateDisplay(compactInline(formatDisplayValue(s)), max(1, width-1))
+}
+
+func truncateDisplay(s string, maxLen int) string {
+	if shouldMiddleTruncate(s, maxLen) {
+		return truncateMiddle(s, maxLen)
+	}
+	return truncate(s, maxLen)
+}
+
+func shouldMiddleTruncate(s string, maxLen int) bool {
+	if maxLen <= 0 {
+		return false
+	}
+	runes := []rune(strings.TrimSpace(s))
+	if len(runes) <= maxLen || len(runes) < 16 {
+		return false
+	}
+
+	alphaNum := 0
+	for _, r := range runes {
+		switch {
+		case r >= 'a' && r <= 'z':
+			alphaNum++
+		case r >= 'A' && r <= 'Z':
+			alphaNum++
+		case r >= '0' && r <= '9':
+			alphaNum++
+		case r == '-', r == '_':
+			// common identifier separators
+		default:
+			return false
+		}
+	}
+
+	return alphaNum >= len(runes)*3/4
+}
+
+func truncateMiddle(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+
+	left := (maxLen - 3) / 2
+	right := maxLen - 3 - left
+	return string(runes[:left]) + "..." + string(runes[len(runes)-right:])
+}
+
+func abbreviateLongTokens(s string, maxTokenLen int) string {
+	if maxTokenLen < 8 {
+		return s
+	}
+	runes := []rune(s)
+	var out strings.Builder
+	start := -1
+	flush := func(end int) {
+		if start == -1 {
+			return
+		}
+		token := string(runes[start:end])
+		if shouldMiddleTruncate(token, maxTokenLen) {
+			out.WriteString(truncateMiddle(token, maxTokenLen))
+		} else {
+			out.WriteString(token)
+		}
+		start = -1
+	}
+
+	for i, r := range runes {
+		if r == ' ' || r == '\t' {
+			flush(i)
+			out.WriteRune(r)
+			continue
+		}
+		if start == -1 {
+			start = i
+		}
+	}
+	flush(len(runes))
+	return out.String()
 }
 
 func formatDisplayValue(s string) string {
@@ -1554,23 +1664,6 @@ func visibleResultColumns(result *db.QueryResult, width, offset int) (int, []tab
 	return start, cols
 }
 
-func visibleColumnsAroundFocus(result *db.QueryResult, width, offset, focus int) (int, []table.Column) {
-	if result == nil || len(result.Columns) == 0 {
-		return 0, nil
-	}
-	focus = clampInt(focus, 0, len(result.Columns)-1)
-	offset = clampInt(offset, 0, len(result.Columns)-1)
-	if focus < offset {
-		offset = focus
-	}
-	start, cols := visibleResultColumns(result, width, offset)
-	for focus >= start+len(cols) && start < len(result.Columns)-1 {
-		start++
-		start, cols = visibleResultColumns(result, width, start)
-	}
-	return start, cols
-}
-
 func resultColumnWidth(result *db.QueryResult, idx, totalWidth int) int {
 	width := utf8.RuneCountInString(result.Columns[idx]) + 2
 	sample := min(25, len(result.Rows))
@@ -1630,9 +1723,9 @@ func (m Model) renderOllamaGenModal() string {
 	case m.ollamaResult != "":
 		resultLines := strings.Split(strings.TrimSpace(m.ollamaResult), "\n")
 		for _, rl := range resultLines {
-			lines = append(lines, dimStyle.Render("  "+truncate(rl, max(20, rowW-2))))
+			lines = append(lines, dimStyle.Render("  "+truncate(abbreviateLongTokens(rl, 18), max(20, rowW-2))))
 		}
-		lines = append(lines, "", dimStyle.Render("enter accepts · r retry · esc cancel"))
+		lines = append(lines, "", dimStyle.Render("enter accepts · v full view · r retry · esc cancel"))
 
 	default:
 		lines = append(lines, m.ollamaInput.View())

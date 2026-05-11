@@ -1,6 +1,8 @@
 # bobdb
 
-Keyboard-first database TUI for SQLite, Postgres, and MongoDB. `bobdb` is built for quick browsing, query writing, result inspection, and copy/export work without leaving the terminal.
+Keyboard-first database TUI for SQLite, Postgres, and MongoDB. `bobdb` is built for the quick browse, query, inspect, and copy/export work that usually pulls you into a heavier GUI.
+
+![bobdb hero screenshot](assets/screenshots/hero.png)
 
 ## Install
 
@@ -33,6 +35,10 @@ CLI helpers:
 bobdb --help
 bobdb --version
 ```
+
+## Media
+
+![bobdb query screenshot](assets/screenshots/query.png)
 
 ## Supported Backends
 

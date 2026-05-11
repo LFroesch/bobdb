@@ -911,19 +911,16 @@ func mongoFindProjectionContext(query string, cursor int, tokens []MongoToken) (
 	if cursor > len(runes) {
 		cursor = len(runes)
 	}
-	lastParen := -1
-	for i := len(runes) - 1; i >= 0; i-- {
-		if runes[i] == ')' {
-			lastParen = i
-			break
-		}
-	}
+	lastParen := mongoShellCallCloseParen(runes)
 
 	if len(tokens) == 3 {
 		if lastParen < 0 {
 			return mongoProjectionContext{}, false
 		}
 		arg := tokens[2]
+		if arg.End > lastParen {
+			return mongoProjectionContext{}, false
+		}
 		if cursor < lastParen || cursor > len(runes) {
 			return mongoProjectionContext{}, false
 		}
@@ -969,6 +966,57 @@ func mongoFindProjectionContext(query string, cursor int, tokens []MongoToken) (
 		suffix:   "}",
 		selected: mongoProjectionSelections(projection.Value),
 	}, true
+}
+
+func mongoShellCallCloseParen(runes []rune) int {
+	callStart := -1
+	for i, r := range runes {
+		if r == '(' {
+			callStart = i
+			break
+		}
+	}
+	if callStart < 0 {
+		return -1
+	}
+	inStr := false
+	escape := false
+	depth := 0
+	for i := callStart + 1; i < len(runes); i++ {
+		r := runes[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if inStr {
+			if r == '\\' {
+				escape = true
+				continue
+			}
+			if r == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			inStr = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		case ')':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		case '(':
+			depth++
+		}
+	}
+	return -1
 }
 
 func mongoProjectionSelections(raw string) map[string]bool {
