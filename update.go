@@ -206,6 +206,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = false
 		if msg.err != nil {
+			if msg.autoRefresh {
+				m.queryErr = ""
+				if strings.TrimSpace(m.statusMsg) == "" {
+					m.setStatus("updated data preview unavailable")
+				} else {
+					m.setStatus(fmt.Sprintf("%s — updated data preview unavailable", m.statusMsg))
+				}
+				return m, nil
+			}
 			m.queryErr = msg.err.Error()
 			m.queryResult = nil
 			m.resultTable.SetRows(nil)
@@ -1694,12 +1703,7 @@ func extractSelectTable(query string) string {
 	if fromIdx < 0 {
 		return ""
 	}
-	rest := strings.TrimSpace(query[fromIdx+6:])
-	end := strings.IndexAny(rest, " \t\n,();")
-	if end < 0 {
-		end = len(rest)
-	}
-	return unquoteIdentifier(rest[:end])
+	return extractLeadingSQLIdentifier(query[fromIdx+6:])
 }
 
 // queryInferredTable returns the table referenced in the query editor text:
@@ -1716,7 +1720,6 @@ func (m Model) queryInferredTable() string {
 func extractTableFromQuery(query string) string {
 	q := strings.TrimSpace(query)
 	upper := strings.ToUpper(q)
-	words := strings.Fields(q)
 	// Standard MongoDB shell syntax: db.collection.method(...)
 	if strings.HasPrefix(q, "db.") {
 		rest := q[3:]
@@ -1725,6 +1728,16 @@ func extractTableFromQuery(query string) string {
 		}
 		return ""
 	}
+	// SQL
+	switch {
+	case strings.HasPrefix(upper, "UPDATE"):
+		return extractLeadingSQLIdentifier(q[len("UPDATE"):])
+	case strings.HasPrefix(upper, "INSERT INTO"):
+		return extractLeadingSQLIdentifier(q[len("INSERT INTO"):])
+	case strings.HasPrefix(upper, "DELETE FROM"):
+		return extractLeadingSQLIdentifier(q[len("DELETE FROM"):])
+	}
+	words := strings.Fields(q)
 	if len(words) < 2 {
 		return ""
 	}
@@ -1732,15 +1745,6 @@ func extractTableFromQuery(query string) string {
 	switch strings.ToLower(words[0]) {
 	case "find", "count", "aggregate", "agg", "insert", "update", "delete":
 		return words[1]
-	}
-	// SQL
-	switch {
-	case strings.HasPrefix(upper, "UPDATE"):
-		return unquoteIdentifier(words[1])
-	case strings.HasPrefix(upper, "INSERT INTO") && len(words) >= 3:
-		return unquoteIdentifier(words[2])
-	case strings.HasPrefix(upper, "DELETE FROM") && len(words) >= 3:
-		return unquoteIdentifier(words[2])
 	}
 	return ""
 }
@@ -1816,6 +1820,26 @@ func unquoteIdentifier(s string) string {
 	s = strings.TrimSuffix(strings.TrimPrefix(s, `"`), `"`)
 	s = strings.TrimSuffix(strings.TrimPrefix(s, "`"), "`")
 	return s
+}
+
+func extractLeadingSQLIdentifier(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	if input[0] == '"' || input[0] == '`' {
+		quote := input[0]
+		for i := 1; i < len(input); i++ {
+			if input[i] == quote {
+				return input[1:i]
+			}
+		}
+	}
+	end := strings.IndexAny(input, " \t\n,();")
+	if end < 0 {
+		end = len(input)
+	}
+	return unquoteIdentifier(input[:end])
 }
 
 func (m Model) runDefaultBrowseQuery() (tea.Model, tea.Cmd) {

@@ -978,6 +978,52 @@ func TestWriteQueryRunsAfterConfirmation(t *testing.T) {
 	}
 }
 
+func TestAutoRefreshErrorDoesNotClobberSuccessfulWriteResult(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabQuery
+	m.queryReqID = 1
+
+	writeQuery := `UPDATE "deployments" SET "actor" = 'maria' WHERE "deployment_id" = '102';`
+	next, cmd := m.Update(queryDoneMsg{
+		reqID: 1,
+		query: writeQuery,
+		result: &db.QueryResult{
+			Message:  "OK — 1 row(s) affected",
+			Affected: 1,
+		},
+	})
+	if cmd == nil {
+		t.Fatalf("expected successful write to schedule auto-refresh")
+	}
+	got := next.(Model)
+
+	if got.queryResult == nil || got.queryResult.Message != "OK — 1 row(s) affected" {
+		t.Fatalf("write result = %#v, want successful write result", got.queryResult)
+	}
+	if got.queryReqID != 2 {
+		t.Fatalf("queryReqID = %d, want 2 after scheduling auto-refresh", got.queryReqID)
+	}
+
+	next, _ = got.Update(queryDoneMsg{
+		reqID:       2,
+		query:       `SELECT * FROM "deployments" WHERE "deployment_id" = '102' LIMIT 1;`,
+		err:         fmt.Errorf(`SQL logic error: unrecognized token: "\" (1)`),
+		autoRefresh: true,
+	})
+	got = next.(Model)
+
+	if got.queryErr != "" {
+		t.Fatalf("queryErr = %q, want auto-refresh error to be hidden", got.queryErr)
+	}
+	if got.queryResult == nil || got.queryResult.Message != "OK — 1 row(s) affected" {
+		t.Fatalf("write result was lost after auto-refresh failure: %#v", got.queryResult)
+	}
+	if !strings.Contains(got.statusMsg, "updated data preview unavailable") {
+		t.Fatalf("status = %q, want preview-unavailable message", got.statusMsg)
+	}
+}
+
 func TestWriteQueryConfirmClosesCompletionPicker(t *testing.T) {
 	m := newModel(&config.Config{})
 	m.activeDB = &fakeDB{dbType: "sqlite"}
@@ -2268,6 +2314,16 @@ func TestExtractTableFromQueryHandlesMongoReadCommands(t *testing.T) {
 		if got := extractTableFromQuery(tc.query); got != tc.want {
 			t.Fatalf("extractTableFromQuery(%q) = %q, want %q", tc.query, got, tc.want)
 		}
+	}
+}
+
+func TestTargetedSelectFromWriteQueryPreservesQuotedSQLiteWhereClause(t *testing.T) {
+	query := `UPDATE "deployments" SET "actor" = 'maria' WHERE "deployment_id" = '102';`
+
+	got := targetedSelectFromWriteQuery(&fakeDB{dbType: "sqlite"}, query)
+	want := `SELECT * FROM "deployments" WHERE "deployment_id" = '102' LIMIT 1;`
+	if got != want {
+		t.Fatalf("targetedSelectFromWriteQuery(%q) = %q, want %q", query, got, want)
 	}
 }
 
