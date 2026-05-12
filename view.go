@@ -69,7 +69,7 @@ func (m Model) renderDialogPage(dialog string) string {
 }
 
 func (m Model) renderHeader() string {
-	title := titleStyle.Render("bobdb")
+	title := titleStyle.Render("bobdb") + " " + dimStyle.Render(version)
 
 	var tabs []string
 	for i, current := range primaryTabs {
