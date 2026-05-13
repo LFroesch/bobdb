@@ -3,6 +3,7 @@ module bobdb
 go 1.25.0
 
 require (
+	github.com/LFroesch/tui-suite/suitechrome v0.0.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.6
@@ -47,3 +48,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/LFroesch/tui-suite/suitechrome => ../suitechrome

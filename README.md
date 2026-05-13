@@ -4,9 +4,11 @@ Keyboard-first database TUI for SQLite, Postgres, and MongoDB. `bobdb` is built 
 
 ![bobdb hero screenshot](assets/screenshots/hero.png)
 
+**Live demo:** [froesch.dev](https://froesch.dev)
+
 ## Install
 
-Supported platforms: Linux and macOS. On Windows, use WSL.
+Supported platforms: Linux, macOS, and Windows.
 
 Recommended:
 
@@ -19,6 +21,16 @@ Other options:
 ```bash
 go install github.com/LFroesch/bobdb@latest
 make install
+```
+
+Windows:
+
+```powershell
+./install.ps1
+```
+
+```bat
+install.cmd
 ```
 
 Run it with any of:

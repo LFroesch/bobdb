@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/LFroesch/tui-suite/suitechrome"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 
@@ -69,27 +70,18 @@ func (m Model) renderDialogPage(dialog string) string {
 }
 
 func (m Model) renderHeader() string {
-	title := titleStyle.Render("bobdb") + " " + dimStyle.Render(version)
+	title := suitechrome.RenderTitle("bobdb", version)
 
-	var tabs []string
+	var tabs []suitechrome.Tab
 	for i, current := range primaryTabs {
-		if i > 0 {
-			tabs = append(tabs, dimStyle.Render(" │ "))
-		}
 		name := tabNames[current]
 		disabled := m.activeDB == nil && (current == tabBrowse || current == tabQuery || current == tabResults)
-		if current == m.activeTab {
-			tabs = append(tabs, activeTabStyle.Render(name))
-		} else if disabled {
-			tabs = append(tabs, dimStyle.Render(name))
-		} else {
-			tabs = append(tabs, inactiveTabStyle.Render(name))
-		}
+		tabs = append(tabs, suitechrome.Tab{Label: fmt.Sprintf("%d %s", i+1, name), Active: current == m.activeTab && !disabled})
 	}
 
-	left := title + "  " + strings.Join(tabs, "")
+	left := title + "  " + suitechrome.RenderTabs(tabs)
 	if m.isCompact() {
-		left = title + "  " + activeTabStyle.Render(tabNames[m.activeTab])
+		left = title + "  " + suitechrome.RenderTabs([]suitechrome.Tab{{Label: tabNames[m.activeTab], Active: true}})
 	}
 
 	var stats []string
@@ -113,7 +105,7 @@ func (m Model) renderHeader() string {
 		gap = max(1, m.width-lipgloss.Width(left))
 	}
 
-	return left + strings.Repeat(" ", gap) + right
+	return suitechrome.JoinHeader(m.width, left, right)
 }
 
 func (m Model) renderFooter() string {
@@ -211,19 +203,15 @@ func (m Model) renderFooter() string {
 	add("?", "help")
 	add("q", "back")
 
-	line := " "
-	for i, item := range hints {
-		seg := keyStyle.Render(item.key) + " " + actionStyle.Render(item.action)
-		next := line + seg
-		if i > 0 {
-			next = line + dimStyle.Render(" · ") + seg
-		}
-		if lipgloss.Width(next) > m.width {
+	var actions []suitechrome.Action
+	for _, item := range hints {
+		next := append(actions, suitechrome.Action{Key: item.key, Label: item.action})
+		if lipgloss.Width(" "+suitechrome.RenderActions(next)) > m.width {
 			break
 		}
-		line = next
+		actions = next
 	}
-	return line
+	return " " + suitechrome.RenderActions(actions)
 }
 
 func (m Model) headerStatusText() string {
