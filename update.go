@@ -434,16 +434,6 @@ func (m Model) updateConnections(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // --- Browse tab ---
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.browseView == browseViewData && browseGridArrowKey(msg) {
-		m.focus = panelRight
-		m.syncTableFocus()
-		return m.updateBrowseData(msg)
-	}
-	if m.browseView == browseViewSchema && browseSchemaArrowKey(msg) {
-		m.focus = panelRight
-		m.syncTableFocus()
-		return m.updateBrowseSchema(msg)
-	}
 	if m.focus == panelRight && m.browseView == browseViewData {
 		return m.updateBrowseData(msg)
 	}
@@ -457,7 +447,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.moveTableCursor(1)
 	case "k", "up":
 		return m.moveTableCursor(-1)
-	case "l", "right":
+	case "l":
 		return m.switchBrowseToData()
 	case "r":
 		m.browseData = nil
@@ -764,11 +754,6 @@ func (m Model) updateQueryPageScroll(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if resultGridArrowKey(msg) && m.queryResult != nil {
-		m.focus = panelRight
-		m.syncTableFocus()
-		return m.updateResultsGrid(msg)
-	}
 	return m.updateResultsGrid(msg)
 }
 
@@ -790,7 +775,7 @@ func (m Model) updateResultsGrid(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m.moveTableCursor(-1)
-	case "l", "right":
+	case "l":
 		if m.focus == panelLeft {
 			m.focus = panelRight
 			m.syncTableFocus()

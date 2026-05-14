@@ -1084,14 +1084,14 @@ func TestColumnValueErrorStopsFetchingLoop(t *testing.T) {
 	}
 }
 
-func TestBrowseRightArrowOpensDataPane(t *testing.T) {
+func TestBrowseLKeyOpensDataPane(t *testing.T) {
 	m := newModel(&config.Config{})
 	m.activeDB = &fakeDB{dbType: "sqlite"}
 	m.activeTab = tabBrowse
 	m.focus = panelLeft
 	m.tables = []string{"users"}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	got := next.(Model)
 
 	if got.browseView != browseViewData {
@@ -1105,7 +1105,7 @@ func TestBrowseRightArrowOpensDataPane(t *testing.T) {
 	}
 }
 
-func TestBrowseArrowKeysDriveDataGridEvenFromLeftPane(t *testing.T) {
+func TestBrowseRightArrowDoesNotSwapPanels(t *testing.T) {
 	m := newModel(&config.Config{})
 	m.activeDB = &fakeDB{dbType: "sqlite"}
 	m.activeTab = tabBrowse
@@ -1123,24 +1123,43 @@ func TestBrowseArrowKeysDriveDataGridEvenFromLeftPane(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	got := next.(Model)
-	if got.focus != panelRight {
-		t.Fatalf("focus = %v, want right", got.focus)
+	if got.focus != panelLeft {
+		t.Fatalf("focus = %v, want left", got.focus)
 	}
-	if got.browseColOffset != 1 {
-		t.Fatalf("browseColOffset = %d, want 1", got.browseColOffset)
-	}
-
-	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyDown})
-	got = next.(Model)
-	if got.browseDataTable.Cursor() != 1 {
-		t.Fatalf("browse cursor = %d, want 1", got.browseDataTable.Cursor())
-	}
-	if cell := got.browseDataTable.Rows()[1][0]; cell != "b@example.com" {
-		t.Fatalf("browse visible cell after down = %q, want b@example.com", cell)
+	if got.browseColOffset != 0 {
+		t.Fatalf("browseColOffset = %d, want 0", got.browseColOffset)
 	}
 }
 
-func TestResultsRightArrowFocusesResultPane(t *testing.T) {
+func TestBrowseDownArrowStaysInLeftPane(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabBrowse
+	m.focus = panelLeft
+	m.width = 120
+	m.tables = []string{"users", "orders"}
+	m.tableCursor = 0
+	m.browseView = browseViewData
+	m.browseData = &db.QueryResult{
+		Columns: []string{"id", "email", "role"},
+		Rows: [][]string{
+			{"1", "a@example.com", "admin"},
+			{"2", "b@example.com", "member"},
+		},
+	}
+	m.syncBrowseDataTable()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := next.(Model)
+	if got.focus != panelLeft {
+		t.Fatalf("focus = %v, want left", got.focus)
+	}
+	if got.tableCursor != 1 {
+		t.Fatalf("tableCursor = %d, want 1", got.tableCursor)
+	}
+}
+
+func TestResultsLKeyFocusesResultPane(t *testing.T) {
 	m := newModel(&config.Config{})
 	m.activeDB = &fakeDB{dbType: "sqlite"}
 	m.activeTab = tabResults
@@ -1152,18 +1171,18 @@ func TestResultsRightArrowFocusesResultPane(t *testing.T) {
 	}
 	m.syncResultTable()
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	got := next.(Model)
 
 	if got.focus != panelRight {
 		t.Fatalf("focus = %v, want right", got.focus)
 	}
-	if got.resultColOffset != 1 {
-		t.Fatalf("resultColOffset = %d, want 1", got.resultColOffset)
+	if got.resultColOffset != 0 {
+		t.Fatalf("resultColOffset = %d, want 0", got.resultColOffset)
 	}
 }
 
-func TestResultsArrowKeysDriveGridEvenFromLeftPane(t *testing.T) {
+func TestResultsRightArrowDoesNotSwapPanels(t *testing.T) {
 	m := newModel(&config.Config{})
 	m.activeDB = &fakeDB{dbType: "sqlite"}
 	m.activeTab = tabResults
@@ -1180,20 +1199,38 @@ func TestResultsArrowKeysDriveGridEvenFromLeftPane(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	got := next.(Model)
-	if got.focus != panelRight {
-		t.Fatalf("focus = %v, want right", got.focus)
+	if got.focus != panelLeft {
+		t.Fatalf("focus = %v, want left", got.focus)
 	}
-	if got.resultColOffset != 1 {
-		t.Fatalf("resultColOffset = %d, want 1", got.resultColOffset)
+	if got.resultColOffset != 0 {
+		t.Fatalf("resultColOffset = %d, want 0", got.resultColOffset)
 	}
+}
 
-	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyDown})
-	got = next.(Model)
-	if got.resultTable.Cursor() != 1 {
-		t.Fatalf("result cursor = %d, want 1", got.resultTable.Cursor())
+func TestResultsDownArrowStaysInLeftPane(t *testing.T) {
+	m := newModel(&config.Config{})
+	m.activeDB = &fakeDB{dbType: "sqlite"}
+	m.activeTab = tabResults
+	m.focus = panelLeft
+	m.width = 120
+	m.tables = []string{"users", "orders"}
+	m.tableCursor = 0
+	m.queryResult = &db.QueryResult{
+		Columns: []string{"id", "email", "status"},
+		Rows: [][]string{
+			{"1", "a@example.com", "active"},
+			{"2", "b@example.com", "paused"},
+		},
 	}
-	if cell := got.resultTable.Rows()[1][0]; cell != "b@example.com" {
-		t.Fatalf("result visible cell after down = %q, want b@example.com", cell)
+	m.syncResultTable()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := next.(Model)
+	if got.focus != panelLeft {
+		t.Fatalf("focus = %v, want left", got.focus)
+	}
+	if got.tableCursor != 1 {
+		t.Fatalf("tableCursor = %d, want 1", got.tableCursor)
 	}
 }
 
